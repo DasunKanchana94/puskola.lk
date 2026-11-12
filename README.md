@@ -3,12 +3,12 @@
 Online Sinhala library: Next.js (App Router) + Supabase.
 
 ## Run locally
-1. `cp .env.example .env.local`
+1. Create `.env.local` with `NEXT_PUBLIC_SUPABASE_URL` and `NEXT_PUBLIC_SUPABASE_KEY` (the project URL and publishable key from the Supabase dashboard)
 2. `npm install`
 3. `npm run dev`
 
 ## Deploy (Vercel)
-Import this repository in Vercel and add the two variables from `.env.example`.
+Import this repository in Vercel and add the same two variables.
 In Supabase > Authentication > URL Configuration, set the Site URL to the live address and add `<address>/auth/callback` to the redirect URLs.
 
 ## Loading book text
