@@ -1,13 +1,18 @@
 import { db } from "@/lib/supabase/server";
+import { getViewer } from "@/lib/data";
+import { MediaList, type MediaItem } from "@/components/MediaList";
 
 export const metadata = { title: "Videos and podcasts" };
 
 export default async function Page() {
-  const { data } = await (await db()).from("media_items").select("id,kind,title,duration,tier").in("kind", "video,podcast".split(",")).eq("published", true).order("sort");
+  const [{ data }, viewer] = await Promise.all([
+    (await db()).from("media_items").select("id,kind,title,duration,tier,file_path,is_video").in("kind", ["video", "podcast"]).eq("published", true).order("sort"),
+    getViewer(),
+  ]);
+  const items = (data ?? []) as MediaItem[];
   return <>
     <h1>Videos and podcasts</h1>
-    {(data ?? []).length ? <div className="mlist" style={{ marginTop: 22 }}>{(data ?? []).map((m) => (
-      <div className="mrow" key={m.id}><div><b>{m.title}</b><div className="muted small">{m.kind} · {m.duration}</div></div><span className="sp" />{m.tier === "free" ? <span className="pill">Free</span> : <span className="pill gold">Subscription</span>}</div>
-    ))}</div> : <div className="card" style={{ marginTop: 22 }}>Nothing has been published here yet. Check back soon.</div>}
+    {items.length ? <MediaList items={items} canPlaySub={!!viewer?.hasPlan || viewer?.role === "admin"} signedIn={!!viewer} />
+      : <div className="card" style={{ marginTop: 22 }}>Nothing has been published here yet. Check back soon.</div>}
   </>;
 }
