@@ -19,7 +19,7 @@ export function FileUpload({ bucket, table, id, accept, label, maxMb }: { bucket
         setState("busy");
         const ext = (file.name.split(".").pop() || "bin").toLowerCase().replace(/[^a-z0-9]/g, "");
         const path = `${id}-${Date.now()}.${ext}`;
-        const { error } = await browserDb().storage.from(bucket).upload(path, file, { contentType: file.type || undefined, upsert: true });
+        const { error } = await browserDb().storage.from(bucket).upload(path, file, { contentType: file.type || undefined, upsert: false });
         if (error) return setState(`Upload failed: ${error.message}`);
         await setFilePath(table, id, path, file.type.startsWith("video"));
         setState("done"); router.refresh();
