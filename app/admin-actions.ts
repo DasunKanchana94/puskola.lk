@@ -97,7 +97,8 @@ export async function setFilePath(table: "books" | "authors" | "media_items", id
   revalidatePath("/", "layout");
 }
 
-type Block = { k: "p" | "v" | "h"; t: string };
+/** A block of text: paragraph, verse, heading, or a picture (t is its file path, cap its caption). */
+type Block = { k: "p" | "v" | "h" | "img"; t: string; cap?: string };
 type Chapter = { n: number; title: string; subtitle?: string; blocks: Block[] };
 
 /** Plain text: a line starting with "# " begins a chapter; blank lines separate paragraphs; lines starting with ">" are verse. */
@@ -140,47 +141,59 @@ async function findOrCreateAuthor(supabase: Awaited<ReturnType<typeof admin>>, i
   return { id: data.id as string, name: row.name, created: true };
 }
 
-/**
- * Loads the text of one edition from a .json file (restoration pipeline) or a .txt file. Replaces the edition's existing text.
- * A .json file may also name the author; the book is then linked to that author, who is added first if new.
- */
-export async function importText(editionId: string, form: FormData) {
-  const supabase = await admin();
-  const file = form.get("file");
-  if (!(file instanceof File) || !file.size) done(form, "/admin/books", "Choose a text file first.");
-  const raw = await (file as File).text();
-  let chapters: Chapter[];
-  let author: AuthorInfo | null = null;
-  if ((file as File).name.toLowerCase().endsWith(".json")) {
-    let meta: Record<string, unknown>;
-    try { meta = JSON.parse(raw); } catch { return done(form, "/admin/books", "That file is not valid JSON."); }
-    chapters = meta.chapters as Chapter[];
-    if (!Array.isArray(chapters)) return done(form, "/admin/books", "The JSON file has no chapters list.");
-    author = authorOf(meta);
-  } else chapters = parseText(raw, String(form.get("title") ?? "Text"));
-  if (!chapters.length) return done(form, "/admin/books", "No text was found in that file.");
-
+/** Saves chapters for an edition, replacing any text it had. Links the book to the author named in the file, adding the author if new. */
+async function saveText(supabase: Awaited<ReturnType<typeof admin>>, editionId: string, chapters: Chapter[], author: AuthorInfo | null) {
   let authorNote = "";
   if (author) {
     const { data: ed } = await supabase.from("book_editions").select("book_id").eq("id", editionId).maybeSingle();
-    try {
-      const a = await findOrCreateAuthor(supabase, author);
-      if (ed) await supabase.from("books").update({ author_id: a.id }).eq("id", ed.book_id);
-      authorNote = a.created ? ` Added the new author ${a.name} and linked the book.` : ` Linked the book to ${a.name}.`;
-    } catch (e) { return done(form, "/admin/books", (e as Error).message); }
+    const a = await findOrCreateAuthor(supabase, author);
+    if (ed) await supabase.from("books").update({ author_id: a.id }).eq("id", ed.book_id);
+    authorNote = a.created ? ` Added the new author ${a.name} and linked the book.` : ` Linked the book to ${a.name}.`;
   }
-
   await supabase.from("chapters").delete().eq("edition_id", editionId);
   const { data: rows, error } = await supabase.from("chapters")
     .insert(chapters.map((ch) => ({ edition_id: editionId, n: ch.n, title: ch.title, subtitle: ch.subtitle ?? "" }))).select("id,n");
-  if (error || !rows) return done(form, "/admin/books", `The chapters could not be saved: ${error?.message}`);
+  if (error || !rows) throw new Error(`The chapters could not be saved: ${error?.message}`);
   const idOf = Object.fromEntries(rows.map((r) => [r.n, r.id]));
-  const paras = chapters.flatMap((ch) => ch.blocks.map((b, idx) => ({ chapter_id: idOf[ch.n], idx, kind: b.k, body: b.t })));
+  const paras = chapters.flatMap((ch) => ch.blocks.map((b, idx) => ({
+    chapter_id: idOf[ch.n], idx, kind: b.k,
+    // A picture keeps its file path on the first line and its caption, if any, on the next.
+    body: b.k === "img" ? [b.t, b.cap ?? ""].filter(Boolean).join("\n") : b.t,
+  })));
   for (let i = 0; i < paras.length; i += 1000) {
     const { error: e2 } = await supabase.from("paragraphs").insert(paras.slice(i, i + 1000));
-    if (e2) return done(form, "/admin/books", `The text could not be saved: ${e2.message}`);
+    if (e2) throw new Error(`The text could not be saved: ${e2.message}`);
   }
-  done(form, "/admin/books", undefined, `Imported ${chapters.length} chapters and ${paras.length} paragraphs.${authorNote}`);
+  const pics = paras.filter((p) => p.kind === "img").length;
+  return `Imported ${chapters.length} chapters and ${paras.length} paragraphs${pics ? `, including ${pics} pictures` : ""}.${authorNote}`;
+}
+
+/**
+ * Imports an edition's text from a file the browser has already put in storage (book-files/imports/...).
+ * The file is a .json from the restoration pipeline (pictures already uploaded and their paths filled in) or a plain .txt.
+ * Reading it from storage keeps big books and books with pictures clear of upload size limits.
+ */
+export async function importFromStorage(editionId: string, path: string, title: string): Promise<{ ok: boolean; message: string }> {
+  const supabase = await admin();
+  if (!path.startsWith("imports/")) return { ok: false, message: "That file is not an import file." };
+  const { data: blob, error } = await supabase.storage.from("book-files").download(path);
+  await supabase.storage.from("book-files").remove([path]);
+  if (error || !blob) return { ok: false, message: `The file could not be read: ${error?.message}` };
+  const raw = await blob.text();
+  let chapters: Chapter[]; let author: AuthorInfo | null = null;
+  if (path.endsWith(".json")) {
+    let meta: Record<string, unknown>;
+    try { meta = JSON.parse(raw); } catch { return { ok: false, message: "That file is not valid JSON." }; }
+    chapters = meta.chapters as Chapter[];
+    if (!Array.isArray(chapters)) return { ok: false, message: "The JSON file has no chapters list." };
+    author = authorOf(meta);
+  } else chapters = parseText(raw, title || "Text");
+  if (!chapters.length) return { ok: false, message: "No text was found in that file." };
+  try {
+    const message = await saveText(supabase, editionId, chapters, author);
+    revalidatePath("/", "layout");
+    return { ok: true, message };
+  } catch (e) { return { ok: false, message: (e as Error).message }; }
 }
 
 /** Gives a reader a plan by hand (for example a gift or a bank-transfer payment). */

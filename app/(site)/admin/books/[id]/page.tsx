@@ -3,7 +3,8 @@ import { Submit } from "@/components/Submit";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/supabase/server";
 import { fileUrl } from "@/lib/data";
-import { adminDelete, adminInsert, adminUpdate, importText } from "@/app/admin-actions";
+import { adminDelete, adminInsert, adminUpdate } from "@/app/admin-actions";
+import { TextImport } from "@/components/TextImport";
 import { BookFields } from "@/components/BookFields";
 import { FileUpload } from "@/components/FileUpload";
 import { Notice } from "@/components/ui";
@@ -45,9 +46,7 @@ export default async function EditBook({ params, searchParams }: { params: Promi
               <select className="inp" style={{ width: "auto" }} name="tier" aria-label="Access" defaultValue={e.tier}><option value="free">Free</option><option value="sub">Subscription</option></select>
               <Submit className="btn sm">Save</Submit></form>
             <div className="small">{e.chapters?.[0]?.count ? <span className="pill">{e.chapters[0].count} chapters loaded</span> : <span className="pill grey">No text yet</span>}</div>
-            <form action={importText.bind(null, e.id)} className="row"><input type="hidden" name="_back" value={back} /><input type="hidden" name="title" value={book.title_si} />
-              <input className="inp" style={{ flex: 1, minWidth: 180 }} type="file" name="file" accept=".txt,.json" aria-label={`Text file for ${e.label}`} required />
-              <Submit className="btn sm pri">{e.chapters?.[0]?.count ? "Replace text" : "Upload text"}</Submit></form>
+            <TextImport editionId={e.id} bookId={id} title={book.title_si} hasText={!!e.chapters?.[0]?.count} />
             {editions.length > 1 && <form action={adminDelete.bind(null, "book_editions", e.id)}><input type="hidden" name="_back" value={back} /><Submit className="btn sm ghost danger">Delete this edition and its text</Submit></form>}
           </div>)}
           <form action={adminInsert.bind(null, "book_editions")} className="row" style={{ borderTop: "1px solid var(--line)", paddingTop: 12 }}>

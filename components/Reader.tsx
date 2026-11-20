@@ -123,6 +123,20 @@ export function Reader({ book, editions, edition, chapters, chapter, paragraphs,
   const say = useCallback((m: string) => { setToast(m); if (toastTimer.current) clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(""), 4200); }, []);
   const update = (p: Partial<Prefs>) => setPrefs((old) => { const next = { ...old, ...p }; try { localStorage.setItem(KEY, JSON.stringify(next)); } catch {} return next; });
   const paged = prefs.view !== "scroll";
+  /** A picture block keeps its file path on the first line and its caption on the next. */
+  const renderPicture = (p: { idx: number; body: string }) => {
+    const [src, ...rest] = p.body.split("\n");
+    const cap = rest.join(" ").trim();
+    const url = /^(https?:)?\/\//.test(src) || src.startsWith("/") ? src : `${process.env.NEXT_PUBLIC_SUPABASE_URL}/storage/v1/object/public/covers/${src}`;
+    return (
+      <figure key={p.idx} data-i={p.idx} className="rimg">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={url} alt={cap} loading="lazy" style={paged && geo ? { maxHeight: Math.round(geo.ph * (cap ? 0.78 : 0.9)) } : undefined}
+          onLoad={() => { if (paged) setGeo((g) => (g ? { ...g } : g)); }} />
+        {cap && <figcaption>{cap}</figcaption>}
+      </figure>
+    );
+  };
   const spreads = geo ? Math.max(1, Math.ceil(pages / geo.cols)) : 1;
   const go = (ed: string, n: number, p = 0, end = false) => {
     window.dispatchEvent(new Event("puskola:busy"));
@@ -327,7 +341,7 @@ export function Reader({ book, editions, edition, chapters, chapter, paragraphs,
   const aloud = () => {
     if (speaking !== null) return stopSpeaking();
     const from = topPara();
-    const lines = paragraphs.filter((p) => p.kind !== "h" && p.idx >= from).slice(0, 40).map((p) => ({ i: p.idx, text: lang ? tr[trKey(p.idx)] ?? "" : p.body })).filter((l) => l.text);
+    const lines = paragraphs.filter((p) => p.kind !== "h" && p.kind !== "img" && p.idx >= from).slice(0, 40).map((p) => ({ i: p.idx, text: lang ? tr[trKey(p.idx)] ?? "" : p.body })).filter((l) => l.text);
     if (lines.length) speakLines(lines);
   };
 
@@ -452,7 +466,8 @@ export function Reader({ book, editions, edition, chapters, chapter, paragraphs,
                 <h1>{chapter.title}</h1>
                 <div className="sub">{chapter.subtitle || `Chapter ${chapter.n}`}{lang ? ` · AI translation to ${lang}` : ""}</div>
                 {paragraphs.map((p) => p.kind === "v" ? <div className={`verse${speaking === p.idx ? " speaking" : ""}`} data-i={p.idx} key={p.idx} style={{ whiteSpace: "pre-line" }}>{p.body}</div>
-                  : p.kind === "h" ? <h2 key={p.idx} data-i={p.idx} className="rsec">{p.body}</h2> : renderPara(p))}
+                  : p.kind === "h" ? <h2 key={p.idx} data-i={p.idx} className="rsec">{p.body}</h2>
+                  : p.kind === "img" ? renderPicture(p) : renderPara(p))}
                 {untranslated > 0 && <p style={{ textAlign: "center" }}><button className="rb" disabled={busy} onClick={() => translateMore()}>{busy ? "Translating…" : "Translate the next section"}</button></p>}
                 {!paged && <div style={{ display: "flex", gap: 10, justifyContent: "space-between", marginTop: 40 }}>
                   {index > 0 ? <button className="rb" onClick={() => go(edition, chapters[index - 1].n)}>Previous chapter</button> : <span />}
