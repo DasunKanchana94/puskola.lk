@@ -4,7 +4,7 @@ import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { unzipSync } from "fflate";
 import { browserDb } from "@/lib/supabase/client";
-import { importFromStorage } from "@/app/admin-actions";
+import { importFromStorage, setFilePath } from "@/app/admin-actions";
 
 type Block = { k: string; t: string; cap?: string };
 type Book = { chapters?: { blocks?: Block[] }[] };
@@ -25,6 +25,7 @@ export function TextImport({ editionId, bookId, title, hasText }: { editionId: s
     const supabase = browserDb();
     const name = file.name.toLowerCase();
     let text: string, ext: "json" | "txt";
+    let note = "";
     setState({ busy: "Reading the file…" });
 
     if (name.endsWith(".zip")) {
@@ -56,6 +57,19 @@ export function TextImport({ editionId, bookId, title, hasText }: { editionId: s
         b.t = uploaded.get(want) ?? b.t;
       }
       if (missing.length) return setState({ err: `These pictures are named in the text but are not in the .zip: ${missing.slice(0, 5).join(", ")}${missing.length > 5 ? "…" : ""}` });
+      // Pictures in the .zip that the text never places: a cover becomes the book cover, the rest are reported.
+      const used = new Set([...uploaded.keys()].map((u) => u.split("/").pop()));
+      const loose = paths.filter((p) => TYPES[(p.split(".").pop() ?? "").toLowerCase()] && !used.has(p.split("/").pop()));
+      const cover = loose.find((p) => /^(front[-_ ]?)?cover\.(jpe?g|png|webp)$/i.test(p.split("/").pop()!));
+      if (cover) {
+        setState({ busy: "Uploading the cover…" });
+        const cext = cover.split(".").pop()!.toLowerCase();
+        const cpath = `${bookId}-${Date.now()}.${cext}`;
+        const { error } = await supabase.storage.from("covers").upload(cpath, new Blob([files[cover] as BlobPart], { type: TYPES[cext] }), { contentType: TYPES[cext], upsert: false });
+        if (!error) { await setFilePath("books", bookId, cpath, false); note += " The cover was set from the .zip."; }
+      }
+      const unplaced = loose.filter((p) => p !== cover);
+      if (unplaced.length) note += ` ${unplaced.length} picture${unplaced.length > 1 ? "s were" : " was"} not used, because the text does not say where ${unplaced.length > 1 ? "they go" : "it goes"}: ${unplaced.slice(0, 4).map((p) => p.split("/").pop()).join(", ")}${unplaced.length > 4 ? "…" : ""}. To place a picture, add a block like {"k": "img", "t": "${unplaced[0].split("/").pop()}"} where it belongs in the text.`;
       text = JSON.stringify(book); ext = "json";
     } else if (name.endsWith(".json")) {
       text = await file.text(); ext = "json";
@@ -72,7 +86,7 @@ export function TextImport({ editionId, bookId, title, hasText }: { editionId: s
     const { error } = await supabase.storage.from("book-files").upload(path, new Blob([text], { type: ext === "json" ? "application/json" : "text/plain" }), { upsert: false });
     if (error) return setState({ err: `The file could not be uploaded: ${error.message}` });
     const res = await importFromStorage(editionId, path, title);
-    setState(res.ok ? { ok: res.message } : { err: res.message });
+    setState(res.ok ? { ok: res.message + note } : { err: res.message });
     if (res.ok) router.refresh();
   };
 
