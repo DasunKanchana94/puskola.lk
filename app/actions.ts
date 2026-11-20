@@ -31,6 +31,30 @@ export async function signUp(form: FormData) {
   redirect("/");
 }
 
+/** Emails a link that signs the reader in and takes them to the page for choosing a new password. */
+export async function requestPasswordReset(form: FormData) {
+  const h = await headers();
+  const origin = `${h.get("x-forwarded-proto") ?? "https"}://${h.get("host")}`;
+  const email = text(form, "email");
+  if (!email.includes("@")) redirect("/login?mode=forgot&error=" + encodeURIComponent("Enter the email address you signed up with."));
+  await (await db()).auth.resetPasswordForEmail(email, { redirectTo: `${origin}/auth/callback?next=/reset-password` });
+  // Same message whether or not the address has an account, so the form cannot be used to check who is a member.
+  redirect("/login?notice=" + encodeURIComponent("If that email has an account, a link to set a new password is on its way. Open it on this device."));
+}
+
+/** Sets a new password for the signed-in reader (reached from the reset email). */
+export async function setNewPassword(form: FormData) {
+  const supabase = await db();
+  const { data: { user } } = await supabase.auth.getUser();
+  if (!user) redirect("/login?mode=forgot&error=" + encodeURIComponent("That link has expired. Ask for a new one."));
+  const password = text(form, "password");
+  if (password.length < 8) redirect("/reset-password?error=" + encodeURIComponent("Use a password of at least 8 characters."));
+  if (password !== text(form, "confirm")) redirect("/reset-password?error=" + encodeURIComponent("The two passwords do not match. Type them again."));
+  const { error } = await supabase.auth.updateUser({ password });
+  if (error) redirect("/reset-password?error=" + encodeURIComponent(error.message));
+  redirect("/account?notice=" + encodeURIComponent("Your new password is saved."));
+}
+
 export async function signOut() {
   await (await db()).auth.signOut();
   redirect("/");
