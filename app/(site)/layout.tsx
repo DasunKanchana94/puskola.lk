@@ -4,6 +4,8 @@ import { COUNTRIES, getCountry, getViewer } from "@/lib/data";
 import { CountrySelect, ThemeToggle } from "@/components/HeaderControls";
 import { initials } from "@/components/ui";
 import { signOut } from "@/app/actions";
+import { AccountMenu } from "@/components/AccountMenu";
+import { Submit } from "@/components/Submit";
 
 const NAV: [string, string][] = [["/", "Home"], ["/browse", "Browse"], ["/categories", "Categories"], ["/authors", "Authors"], ["/audiobooks", "Audiobooks"], ["/videos", "Videos and podcasts"]];
 
@@ -21,16 +23,13 @@ export default async function SiteLayout({ children }: { children: React.ReactNo
           <CountrySelect value={country} countries={COUNTRIES} />
           <ThemeToggle theme={theme} />
           {viewer ? (
-            <details className="acct">
-              <summary className="btn sm"><span className="avatar xs">{initials(viewer.name)}</span>{viewer.name.split(" ")[0]}</summary>
-              <div className="dd">
+            <AccountMenu label={<><span className="avatar xs">{initials(viewer.name)}</span>{viewer.name.split(" ")[0]}</>}>
                 <Link href="/library">My library</Link>
                 <Link href="/account">Profile and plan</Link>
                 <Link href="/plans">Plans</Link>
                 {viewer.role === "admin" && <Link href="/admin">Back office</Link>}
-                <form action={signOut}><button>Sign out</button></form>
-              </div>
-            </details>
+                <form action={signOut}><Submit className="">Sign out</Submit></form>
+            </AccountMenu>
           ) : <Link className="btn sm" href="/login">Sign in</Link>}
         </div>
         <div className="navrow"><nav className="wrap nav" aria-label="Main">{NAV.map((n) => <Link key={n[0]} href={n[0]}>{n[1]}</Link>)}</nav></div>

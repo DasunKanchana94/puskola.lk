@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Submit } from "@/components/Submit";
 import { db } from "@/lib/supabase/server";
 import { adminInsert } from "@/app/admin-actions";
 import { BookFields } from "@/components/BookFields";
@@ -18,7 +19,7 @@ export default async function NewBook({ searchParams }: { searchParams: Promise<
       <input type="hidden" name="_back" value="/admin/books/new" />
       <BookFields book={{}} authors={authors ?? []} categories={cats ?? []} />
       <label>Access<select className="inp" name="tier" id="bk-tier" defaultValue="sub"><option value="sub">Subscription</option><option value="free">Free</option></select></label>
-      <div className="row"><button className="btn pri">Create book</button><Link className="btn ghost" href="/admin/books">Cancel</Link></div>
+      <div className="row"><Submit className="btn pri">Create book</Submit><Link className="btn ghost" href="/admin/books">Cancel</Link></div>
     </form>
   </>;
 }

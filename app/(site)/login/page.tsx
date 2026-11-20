@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Submit } from "@/components/Submit";
 import { requestPasswordReset, signIn, signUp } from "@/app/actions";
 import { Notice } from "@/components/ui";
 
@@ -13,7 +14,7 @@ export default async function Login({ searchParams }: { searchParams: Promise<{ 
     <Notice error={error} notice={notice} />
     <form action={requestPasswordReset} className="card" style={{ display: "grid", gap: 12 }}>
       <label>Email<input className="inp" name="email" id="email" type="email" required autoComplete="email" /></label>
-      <button className="btn pri">Send reset link</button>
+      <Submit className="btn pri">Send reset link</Submit>
     </form>
     <p style={{ marginTop: 14 }}><Link href="/login">Back to sign in</Link></p>
   </div>;
@@ -26,7 +27,7 @@ export default async function Login({ searchParams }: { searchParams: Promise<{ 
       {signup && <label>Name<input className="inp" name="name" id="name" required autoComplete="name" /></label>}
       <label>Email<input className="inp" name="email" id="email" type="email" required autoComplete="email" /></label>
       <label>Password<input className="inp" name="password" id="password" type="password" required minLength={8} autoComplete={signup ? "new-password" : "current-password"} /></label>
-      <button className="btn pri">{signup ? "Create account" : "Sign in"}</button>
+      <Submit className="btn pri">{signup ? "Create account" : "Sign in"}</Submit>
       {!signup && <Link className="small" href="/login?mode=forgot">Forgot your password?</Link>}
     </form>
     <p style={{ marginTop: 14 }}>{signup ? <>Already a member? <Link href="/login">Sign in</Link></> : <>New here? <Link href="/login?mode=signup">Create an account</Link></>}</p>

@@ -1,4 +1,5 @@
 import { db } from "@/lib/supabase/server";
+import { Submit } from "@/components/Submit";
 import { adminDelete, adminInsert, adminUpdate } from "@/app/admin-actions";
 import { FileUpload } from "@/components/FileUpload";
 import { Notice } from "@/components/ui";
@@ -22,13 +23,13 @@ export default async function Media({ searchParams }: { searchParams: Promise<{ 
     <h1>Audio, video, podcasts</h1>
     <p className="muted small" style={{ margin: "6px 0 16px" }}>Add an item, upload its file, then tick Published. MP3, M4A or MP4, up to 50 MB per file on the current storage plan.</p>
     <Notice error={error} notice={notice} />
-    <form action={adminInsert.bind(null, "media_items")} className="card row" style={{ marginBottom: 18 }}><input type="hidden" name="_back" value={back} />{fields()}<button className="btn pri">Add item</button></form>
+    <form action={adminInsert.bind(null, "media_items")} className="card row" style={{ marginBottom: 18 }}><input type="hidden" name="_back" value={back} />{fields()}<Submit className="btn pri">Add item</Submit></form>
     {(items ?? []).length ? <div style={{ display: "grid", gap: 10 }}>{(items ?? []).map((m) => <div key={m.id} className="card" style={{ display: "grid", gap: 10 }}>
       <form action={adminUpdate.bind(null, "media_items", m.id)} className="row"><input type="hidden" name="_back" value={back} /><input type="hidden" name="_flags" value="published" />{fields(m)}
-        <label className="row small" style={{ gap: 5 }}><input type="checkbox" name="published" defaultChecked={m.published} />Published</label><button className="btn sm pri">Save</button></form>
+        <label className="row small" style={{ gap: 5 }}><input type="checkbox" name="published" defaultChecked={m.published} />Published</label><Submit className="btn sm pri">Save</Submit></form>
       <div className="row">{m.file_path ? <span className="pill">File uploaded</span> : <span className="pill red">No file yet</span>}
         <FileUpload bucket="media" table="media_items" id={m.id} accept="audio/*,video/*" label={m.file_path ? "Replace file" : "Upload file"} maxMb={50} /><span className="sp" />
-        <form action={adminDelete.bind(null, "media_items", m.id)}><input type="hidden" name="_back" value={back} /><button className="btn sm ghost danger">Delete</button></form></div>
+        <form action={adminDelete.bind(null, "media_items", m.id)}><input type="hidden" name="_back" value={back} /><Submit className="btn sm ghost danger">Delete</Submit></form></div>
     </div>)}</div> : <div className="card">No audio or video yet. Add the first item above.</div>}
   </>;
 }

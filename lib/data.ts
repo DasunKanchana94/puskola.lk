@@ -1,3 +1,4 @@
+import { cache } from "react";
 import { cookies } from "next/headers";
 import { db, SUPABASE_URL } from "./supabase/server";
 
@@ -22,15 +23,18 @@ export const money = (n: number) => "$" + (Number(n) % 1 ? Number(n).toFixed(2) 
 
 const BOOK_COLS = "id,slug,title_si,title_en,description,language,cover_path,category_id,published,featured,is_new,regions,reads,authors(slug,name),book_editions(id,kind,label,tier,sort)";
 
-export async function getCountry() {
+export const getCountry = cache(async () => {
   const c = (await cookies()).get("country")?.value ?? "XX";
   return COUNTRIES.some((x) => x[0] === c) ? c : "XX";
-}
+});
 
-export async function getViewer(): Promise<Viewer> {
+/** The signed-in reader, checked once per request. getClaims verifies the session token locally instead of calling the auth server. */
+export const getViewer = cache(async (): Promise<Viewer> => {
   const supabase = await db();
-  const { data: { user } } = await supabase.auth.getUser();
-  if (!user) return null;
+  const { data } = await supabase.auth.getClaims();
+  const claims = data?.claims;
+  if (!claims?.sub) return null;
+  const user = { id: claims.sub, email: (claims.email as string | undefined) ?? "" };
   const [{ data: profile }, { data: ents }] = await Promise.all([
     supabase.from("profiles").select("full_name,role").eq("id", user.id).maybeSingle(),
     supabase.from("entitlements").select("ends_at,plans(name)").eq("user_id", user.id).order("starts_at", { ascending: false }),
@@ -41,7 +45,7 @@ export async function getViewer(): Promise<Viewer> {
     id: user.id, email: user.email ?? "", name: profile?.full_name || (user.email ?? "").split("@")[0], role: profile?.role ?? "reader",
     hasPlan: !!active, planName: active?.plans?.name ?? null, until: active?.ends_at ?? null,
   };
-}
+});
 
 /** Published books offered in the reader's country. */
 export async function getBooks(opts: { category?: string; q?: string; authorId?: string } = {}): Promise<Book[]> {

@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Submit } from "@/components/Submit";
 import { setNewPassword } from "@/app/actions";
 import { getViewer } from "@/lib/data";
 import { Notice } from "@/components/ui";
@@ -19,7 +20,7 @@ export default async function ResetPassword({ searchParams }: { searchParams: Pr
     <form action={setNewPassword} className="card" style={{ display: "grid", gap: 12 }}>
       <label>New password<input className="inp" name="password" id="password" type="password" required minLength={8} autoComplete="new-password" /></label>
       <label>Type it again<input className="inp" name="confirm" id="confirm" type="password" required minLength={8} autoComplete="new-password" /></label>
-      <button className="btn pri">Save new password</button>
+      <Submit className="btn pri">Save new password</Submit>
     </form>
   </div>;
 }

@@ -2,7 +2,7 @@
 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState, useTransition } from "react";
 import { saveProgress } from "@/app/actions";
 import { deleteBookmark, deleteHighlight, saveHighlight, toggleBookmark, type Bookmark, type Highlight } from "@/app/reader-actions";
 
@@ -16,15 +16,21 @@ type Props = {
   places: Record<string, { n: number; ed: string }>;
   bookmarks: Bookmark[]; highlights: Highlight[];
   signedIn: boolean; startPara: number;
+  /** Open on the last page (used when turning back from the next chapter). */
+  startAtEnd?: boolean;
+  /** Section headings of each chapter in this edition, for the contents panel. */
+  sections: Record<string, { idx: number; title: string }[]>;
 };
-type Prefs = { theme: "light" | "sepia" | "dark"; size: number; font: "serif" | "sans"; lh: number; width: number; rate: number; vol: number };
+type View = "spread" | "page" | "scroll";
+type Geo = { pw: number; ph: number; g: number; cols: number };
+type Prefs = { theme: "light" | "sepia" | "dark"; size: number; font: "serif" | "sans"; lh: number; width: number; rate: number; vol: number; view: View; toc: boolean };
 type Sound = "off" | "rain" | "stream" | "drone";
 type Sel = { p: number; s: number; e: number; text: string };
 type Pop = { x: number; y: number; below: boolean } & ({ kind: "sel"; sel: Sel; noting: boolean } | { kind: "mark"; mark: Highlight });
 type ChatMsg = { role: "user" | "assistant"; content: string; failed?: boolean };
 
 const KEY = "puskola-reader";
-const DEFAULTS: Prefs = { theme: "light", size: 19, font: "serif", lh: 1.9, width: 680, rate: 1, vol: 0.25 };
+const DEFAULTS: Prefs = { theme: "light", size: 19, font: "serif", lh: 1.9, width: 680, rate: 1, vol: 0.25, view: "spread", toc: false };
 const LANGS: [string, string, string][] = [["English", "English", "en"], ["Tamil", "Tamil", "ta"], ["Hindi", "Hindi", "hi"], ["Japanese", "Japanese", "ja"], ["Chinese", "Chinese", "zh"]];
 const SWATCH = ["#ffd640", "#78dc96", "#78beff", "#ff96aa"];
 const QUICK = ["Summarise this chapter in 5 points", "Who are the main people in this chapter?", "මේ පරිච්ඡේදයේ අමාරු වචන පැහැදිලි කරන්න"];
@@ -75,7 +81,7 @@ function Seg<T extends string | number>({ opts, cur, set }: { opts: [T, string][
   return <div className="seg">{opts.map((o) => <button key={String(o[0])} type="button" className={`rb${o[0] === cur ? " on" : ""}`} aria-pressed={o[0] === cur} onClick={() => set(o[0])}>{o[1]}</button>)}</div>;
 }
 
-export function Reader({ book, editions, edition, chapters, chapter, paragraphs, places, bookmarks: bm0, highlights: hl0, signedIn, startPara }: Props) {
+export function Reader({ book, editions, edition, chapters, chapter, paragraphs, places, bookmarks: bm0, highlights: hl0, signedIn, startPara, startAtEnd, sections }: Props) {
   const router = useRouter();
   const [prefs, setPrefs] = useState<Prefs>(DEFAULTS);
   const [menu, setMenu] = useState<"look" | "music" | null>(null);
@@ -95,6 +101,17 @@ export function Reader({ book, editions, edition, chapters, chapter, paragraphs,
   const [asking, setAsking] = useState(false);
   const [q, setQ] = useState("");
   const [speaking, setSpeaking] = useState<number | null>(null);
+  const [geo, setGeo] = useState<Geo | null>(null);
+  const [spread, setSpread] = useState(0);
+  const [pages, setPages] = useState(1);
+  const [loading, startLoading] = useTransition();
+  const stage = useRef<HTMLDivElement>(null);
+  /** Where to open once the pages have been laid out: a paragraph, or the end of the chapter. */
+  const pending = useRef<{ para?: number; end?: boolean } | null>(null);
+  /** The paragraph at the top of the current page, kept so a change of text size stays at the same place. */
+  const anchor = useRef<number | null>(null);
+  const touch = useRef<{ x: number; y: number; t: number } | null>(null);
+  const turnRef = useRef<(d: number) => void>(() => {});
 
   const scroller = useRef<HTMLDivElement>(null), chatBox = useRef<HTMLDivElement>(null);
   const timer = useRef<ReturnType<typeof setTimeout> | null>(null), toastTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -105,15 +122,34 @@ export function Reader({ book, editions, edition, chapters, chapter, paragraphs,
   const trKey = (i: number, l = lang) => `${chapter.id}|${l}|${i}`;
   const say = useCallback((m: string) => { setToast(m); if (toastTimer.current) clearTimeout(toastTimer.current); toastTimer.current = setTimeout(() => setToast(""), 4200); }, []);
   const update = (p: Partial<Prefs>) => setPrefs((old) => { const next = { ...old, ...p }; try { localStorage.setItem(KEY, JSON.stringify(next)); } catch {} return next; });
-  const go = (ed: string, n: number, p = 0) => router.push(`/read/${book.slug}?ed=${ed}&ch=${n}${p ? `&p=${p}` : ""}`);
-  const paraEl = (i: number) => scroller.current?.querySelector<HTMLElement>(`p[data-i="${i}"]`) ?? null;
+  const paged = prefs.view !== "scroll";
+  const spreads = geo ? Math.max(1, Math.ceil(pages / geo.cols)) : 1;
+  const go = (ed: string, n: number, p = 0, end = false) => {
+    window.dispatchEvent(new Event("puskola:busy"));
+    startLoading(() => router.push(`/read/${book.slug}?ed=${ed}&ch=${n}${p ? `&p=${p}` : ""}${end ? "&end=1" : ""}`));
+  };
+  const paraEl = (i: number) => scroller.current?.querySelector<HTMLElement>(`[data-i="${i}"]`) ?? null;
+  /** The first paragraph the reader can see now. */
   const topPara = () => {
     const el = scroller.current; if (!el) return 0;
-    const top = el.getBoundingClientRect().top + 50;
-    const first = [...el.querySelectorAll<HTMLElement>("p[data-i]")].find((p) => p.getBoundingClientRect().bottom > top);
+    const box = el.getBoundingClientRect();
+    const all = [...el.querySelectorAll<HTMLElement>("[data-i]")];
+    const first = paged
+      ? all.find((p) => { const r = p.getBoundingClientRect(); return r.right > box.left + 2 && r.left < box.right - 2; })
+      : all.find((p) => p.getBoundingClientRect().bottom > box.top + 50);
     return Number(first?.dataset.i ?? 0);
   };
-  const flash = (i: number) => { const el = paraEl(i); if (!el) return; el.scrollIntoView({ block: "center" }); el.classList.add("speaking"); setTimeout(() => el.classList.remove("speaking"), 1600); };
+  /** Which spread an element starts on, in book view. */
+  const spreadOf = (target: HTMLElement) => {
+    const el = scroller.current; if (!el || !geo) return 0;
+    const x = target.getBoundingClientRect().left - el.getBoundingClientRect().left + el.scrollLeft;
+    return Math.max(0, Math.floor(Math.floor((x + 2) / (geo.pw + geo.g)) / geo.cols));
+  };
+  const reveal = (target: HTMLElement | null) => {
+    if (!target) return;
+    if (paged) setSpread(spreadOf(target)); else target.scrollIntoView({ block: "center" });
+  };
+  const flash = (i: number) => { const el = paraEl(i); if (!el) return; reveal(el); el.classList.add("speaking"); setTimeout(() => el.classList.remove("speaking"), 1600); };
 
   const stopSpeaking = useCallback(() => { speakToken.current++; try { window.speechSynthesis?.cancel(); } catch {} setSpeaking(null); }, []);
 
@@ -127,14 +163,88 @@ export function Reader({ book, editions, edition, chapters, chapter, paragraphs,
     // eslint-disable-next-line react-hooks/set-state-in-effect
     stopSpeaking(); setPop(null);
     const el = scroller.current, target = startPara ? paraEl(startPara) : null;
-    if (el) el.scrollTop = target ? target.offsetTop - 20 : 0;
+    if (el) { el.scrollTop = !paged && target ? target.offsetTop - 20 : 0; el.scrollLeft = 0; }
     if (target) { target.classList.add("speaking"); setTimeout(() => target.classList.remove("speaking"), 1600); }
     setPct(Math.round((index / chapters.length) * 100));
     if (signedIn) saveProgress(book.id, chapter.id, startPara, Math.round((index / chapters.length) * 100));
-  }, [chapter.id, startPara]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [chapter.id, startPara, startAtEnd]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  /* ----- book view: measure the page size and count the pages ----- */
+  // Runs before the page count below, so a new chapter opens at the right page.
+  useLayoutEffect(() => {
+    if (!paged) return;
+    // eslint-disable-next-line react-hooks/set-state-in-effect
+    setSpread(0);
+    pending.current = startAtEnd ? { end: true } : startPara ? { para: startPara } : null;
+    anchor.current = null;
+  }, [chapter.id, startPara, startAtEnd]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const layout = () => {
+    const st = stage.current;
+    if (!paged || !st) return;
+    const narrow = st.clientWidth < 640;
+    const g = narrow ? 32 : 56, side = narrow ? 8 : 52;
+    const W = st.clientWidth - side * 2, H = st.clientHeight - (narrow ? 16 : 40);
+    const cols = prefs.view === "spread" && W >= 900 ? 2 : 1;
+    const max = cols === 2 ? Math.min(prefs.width * 0.82, 600) : prefs.width;
+    const pw = Math.floor(Math.max(220, Math.min(max, (W - g * cols) / cols)));
+    const ph = Math.floor(Math.max(240, H - (narrow ? 66 : 86)));
+    setGeo((old) => (old && old.pw === pw && old.ph === ph && old.g === g && old.cols === cols ? old : { pw, ph, g, cols }));
+  };
+  useLayoutEffect(() => {
+    layout();
+    const st = stage.current; if (!st) return;
+    const ro = new ResizeObserver(() => layout()); ro.observe(st);
+    return () => ro.disconnect();
+  }, [prefs.view, prefs.width]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Count pages after anything that changes how the text flows.
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!paged || !geo || !el) return;
+    const count = () => {
+      const n = Math.max(1, Math.round((el.scrollWidth + geo.g) / (geo.pw + geo.g)));
+      setPages(n);
+      const total = Math.max(1, Math.ceil(n / geo.cols));
+      const want = pending.current;
+      if (want?.end) { setSpread(total - 1); pending.current = null; }
+      else if (want?.para !== undefined) { const t = paraEl(want.para); el.scrollLeft = 0; if (t) setSpread(Math.min(total - 1, spreadOf(t))); pending.current = null; }
+      else {
+        const t = anchor.current !== null ? paraEl(anchor.current) : null;
+        setSpread((s) => Math.min(t ? spreadOf(t) : s, total - 1));
+      }
+    };
+    count();
+    let alive = true;
+    document.fonts?.ready.then(() => { if (alive) count(); });
+    return () => { alive = false; };
+  }, [geo, paged, prefs.size, prefs.lh, prefs.font, paragraphs, tr, lang, chapter.id]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Show the current spread, and remember the place.
+  useLayoutEffect(() => {
+    const el = scroller.current;
+    if (!paged || !geo || !el) return;
+    el.scrollLeft = spread * geo.cols * (geo.pw + geo.g);
+    anchor.current = topPara();
+    const overall = Math.round(((index + (spreads > 1 ? spread / (spreads - 1) : 1)) / chapters.length) * 100);
+    setPct(overall);
+    setPop(null);
+    if (!signedIn) return;
+    if (timer.current) clearTimeout(timer.current);
+    timer.current = setTimeout(() => saveProgress(book.id, chapter.id, topPara(), overall), 1200);
+  }, [spread, geo, pages]); // eslint-disable-line react-hooks/exhaustive-deps
+
+  const turn = (d: number) => {
+    if (!paged) return;
+    const n = spread + d;
+    if (n < 0) { if (index > 0) go(edition, chapters[index - 1].n, 0, true); return; }
+    if (n >= spreads) { if (index < chapters.length - 1) go(edition, chapters[index + 1].n); return; }
+    setSpread(n);
+  };
+  useEffect(() => { turnRef.current = turn; });
 
   const onScroll = () => {
-    const el = scroller.current; if (!el) return;
+    const el = scroller.current; if (!el || paged) return;
     const frac = el.scrollTop / Math.max(1, el.scrollHeight - el.clientHeight);
     const overall = Math.round(((index + frac) / chapters.length) * 100);
     setPct(overall); if (pop) setPop(null);
@@ -159,7 +269,13 @@ export function Reader({ book, editions, edition, chapters, chapter, paragraphs,
       setPop({ kind: "sel", noting: false, sel: { p: Number(a.dataset.i), s: start, e: start + text.length, text }, x: Math.max(165, Math.min(window.innerWidth - 165, r.left + r.width / 2)), y: below ? r.bottom + 8 : r.top - 8, below });
     };
     const handler = () => { clearTimeout(t); t = setTimeout(onSelect, 280); };
-    const onKey = (e: KeyboardEvent) => { if (e.key === "Escape") { setFocus(false); setPop(null); setMenu(null); } };
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === "Escape") { setFocus(false); setPop(null); setMenu(null); return; }
+      const t = e.target as HTMLElement;
+      if (t.closest("input,textarea,select,[contenteditable]") || e.metaKey || e.ctrlKey || e.altKey) return;
+      if (e.key === "ArrowRight" || e.key === "PageDown" || (e.key === " " && !e.shiftKey)) { e.preventDefault(); turnRef.current(1); }
+      else if (e.key === "ArrowLeft" || e.key === "PageUp" || (e.key === " " && e.shiftKey)) { e.preventDefault(); turnRef.current(-1); }
+    };
     document.addEventListener("selectionchange", handler); document.addEventListener("keydown", onKey);
     return () => { clearTimeout(t); document.removeEventListener("selectionchange", handler); document.removeEventListener("keydown", onKey); };
   }, []);
@@ -203,7 +319,7 @@ export function Reader({ book, editions, edition, chapters, chapter, paragraphs,
       if (voice) u.voice = voice; u.lang = voice?.lang ?? code; u.rate = prefs.rate;
       u.onend = () => next(k + 1); u.onerror = () => { if (token === speakToken.current) setSpeaking(null); };
       const i = queue[k].i;
-      if (i !== null) { setSpeaking(i); if (k === 0 || queue[k - 1].i !== i) paraEl(i)?.scrollIntoView({ block: "center" }); } else setSpeaking(-1);
+      if (i !== null) { setSpeaking(i); if (k === 0 || queue[k - 1].i !== i) reveal(paraEl(i)); } else setSpeaking(-1);
       synth.speak(u);
     };
     next(0);
@@ -211,7 +327,7 @@ export function Reader({ book, editions, edition, chapters, chapter, paragraphs,
   const aloud = () => {
     if (speaking !== null) return stopSpeaking();
     const from = topPara();
-    const lines = paragraphs.filter((p) => p.kind === "p" && p.idx >= from).slice(0, 40).map((p) => ({ i: p.idx, text: lang ? tr[trKey(p.idx)] ?? "" : p.body })).filter((l) => l.text);
+    const lines = paragraphs.filter((p) => p.kind !== "h" && p.idx >= from).slice(0, 40).map((p) => ({ i: p.idx, text: lang ? tr[trKey(p.idx)] ?? "" : p.body })).filter((l) => l.text);
     if (lines.length) speakLines(lines);
   };
 
@@ -278,10 +394,8 @@ export function Reader({ book, editions, edition, chapters, chapter, paragraphs,
     <div id="reader" data-rt={prefs.theme} className={focus ? "focus" : ""} style={style} onClick={(e) => { const t = e.target as HTMLElement; if (menu && !t.closest(".menu,[data-menu]")) setMenu(null); if (pop && !t.closest(".pop,mark") && window.getSelection()?.isCollapsed) setPop(null); }}>
       <div className="rbar">
         <Link className="rb" href={`/books/${book.slug}`}>Back</Link>
+        <button className={`rb${prefs.toc ? " on" : ""}`} aria-expanded={prefs.toc} aria-controls="rtoc" onClick={() => update({ toc: !prefs.toc })}>පටුන</button>
         <span className="t">{book.title}</span>
-        <select className="rb" aria-label="Chapter" value={chapter.n} onChange={(e) => go(edition, Number(e.target.value))}>
-          {chapters.map((c) => <option key={c.n} value={c.n}>Ch. {c.n} {c.title}</option>)}
-        </select>
         {editions.length > 1 && <select className="rb" aria-label="Edition" value={edition} onChange={(e) => go(e.target.value, chapter.n)}>
           {editions.map((e) => <option key={e.kind} value={e.kind} disabled={e.locked}>{e.label}{e.locked ? " (subscribers)" : ""}</option>)}
         </select>}
@@ -300,6 +414,7 @@ export function Reader({ book, editions, edition, chapters, chapter, paragraphs,
       <div className="rprog"><i style={{ width: pct + "%" }} /></div>
 
       {menu === "look" && <div className="menu on" style={{ top: 52, right: 12 }}>
+        <label>Layout<Seg<View> opts={[["spread", "Two pages"], ["page", "One page"], ["scroll", "Scroll"]]} cur={prefs.view} set={(v) => update({ view: v })} /></label>
         <label>Text size<div className="seg"><button className="rb" aria-label="Smaller text" onClick={() => update({ size: Math.max(14, prefs.size - 2) })}>A−</button><button className="rb" aria-label="Larger text" onClick={() => update({ size: Math.min(30, prefs.size + 2) })}>A+</button></div></label>
         <label>Theme<Seg opts={[["light", "White"], ["sepia", "Sepia"], ["dark", "Dark"]]} cur={prefs.theme} set={(v) => update({ theme: v })} /></label>
         <label>Font<Seg opts={[["serif", "Serif"], ["sans", "Sans"]]} cur={prefs.font} set={(v) => update({ font: v })} /></label>
@@ -313,17 +428,46 @@ export function Reader({ book, editions, edition, chapters, chapter, paragraphs,
       </div>}
 
       <div className="rbody">
-        <div className="rscroll" ref={scroller} onScroll={onScroll}><div className="rtext">
-          <h1>{chapter.title}</h1>
-          <div className="sub">Chapter {chapter.n}{chapter.subtitle ? ` · ${chapter.subtitle}` : ""}{lang ? ` · AI translation to ${lang}` : ""}</div>
-          {paragraphs.map((p) => p.kind === "v" ? <div className="verse" key={p.idx} style={{ whiteSpace: "pre-line" }}>{p.body}</div>
-            : p.kind === "h" ? <h2 key={p.idx} style={{ textAlign: "center", margin: "1.4em 0 .6em", fontFamily: "inherit" }}>{p.body}</h2> : renderPara(p))}
-          {untranslated > 0 && <p style={{ textAlign: "center" }}><button className="rb" disabled={busy} onClick={() => translateMore()}>{busy ? "Translating…" : "Translate the next section"}</button></p>}
-          <div style={{ display: "flex", gap: 10, justifyContent: "space-between", marginTop: 40 }}>
-            {index > 0 ? <button className="rb" onClick={() => go(edition, chapters[index - 1].n)}>Previous chapter</button> : <span />}
-            {index < chapters.length - 1 && <button className="rb" onClick={() => go(edition, chapters[index + 1].n)}>Next chapter</button>}
+        <nav id="rtoc" className={`rtoc${prefs.toc ? " on" : ""}`} aria-label="Contents">
+          <h3>පටුන<span style={{ flex: 1 }} /><button className="rb" onClick={() => update({ toc: false })} aria-label="Close the contents">✕</button></h3>
+          <ol>{chapters.map((c) => {
+            const here = c.id === chapter.id, secs = sections[c.id] ?? [];
+            return <li key={c.id} className={here ? "here" : ""}>
+              <button className="tc" aria-current={here ? "page" : undefined} onClick={() => { if (!here) go(edition, c.n); else reveal(scroller.current?.querySelector("h1") ?? null); if (window.innerWidth < 900) update({ toc: false }); }}>{c.title}</button>
+              {here && secs.length > 0 && <ol>{secs.map((x) => <li key={x.idx}><button className="ts" onClick={() => { flash(x.idx); if (window.innerWidth < 900) update({ toc: false }); }}>{x.title}</button></li>)}</ol>}
+            </li>;
+          })}</ol>
+        </nav>
+
+        <div ref={stage} className={`rstage${paged ? " paged" : ""}`}
+          onTouchStart={(e) => { const t = e.touches[0]; touch.current = { x: t.clientX, y: t.clientY, t: Date.now() }; }}
+          onTouchEnd={(e) => { const s0 = touch.current, t = e.changedTouches[0]; touch.current = null; if (!s0 || !paged || !window.getSelection()?.isCollapsed) return;
+            const dx = t.clientX - s0.x, dy = t.clientY - s0.y; if (Math.abs(dx) > 50 && Math.abs(dx) > Math.abs(dy) * 1.5 && Date.now() - s0.t < 700) turn(dx < 0 ? 1 : -1); }}>
+          {paged && <button className="turn prev" aria-label="Previous page" onClick={() => turn(-1)} disabled={spread === 0 && index === 0}>‹</button>}
+          <div className={`book${paged && geo?.cols === 2 ? " spread" : ""}`} style={paged && geo ? { width: geo.cols * geo.pw + geo.cols * geo.g, paddingInline: geo.g / 2 } : undefined}>
+            {paged && geo && <div className="rhead"><span>{book.title}</span>{geo.cols === 2 && <span>{chapter.title}</span>}</div>}
+            <div className="rscroll" ref={scroller} onScroll={onScroll}
+              style={paged && geo ? { width: geo.cols * geo.pw + (geo.cols - 1) * geo.g, height: geo.ph } : undefined}>
+              <div className="rtext" style={paged && geo ? { height: geo.ph, columnCount: geo.cols, columnGap: geo.g } : undefined}>
+                <h1>{chapter.title}</h1>
+                <div className="sub">{chapter.subtitle || `Chapter ${chapter.n}`}{lang ? ` · AI translation to ${lang}` : ""}</div>
+                {paragraphs.map((p) => p.kind === "v" ? <div className={`verse${speaking === p.idx ? " speaking" : ""}`} data-i={p.idx} key={p.idx} style={{ whiteSpace: "pre-line" }}>{p.body}</div>
+                  : p.kind === "h" ? <h2 key={p.idx} data-i={p.idx} className="rsec">{p.body}</h2> : renderPara(p))}
+                {untranslated > 0 && <p style={{ textAlign: "center" }}><button className="rb" disabled={busy} onClick={() => translateMore()}>{busy ? "Translating…" : "Translate the next section"}</button></p>}
+                {!paged && <div style={{ display: "flex", gap: 10, justifyContent: "space-between", marginTop: 40 }}>
+                  {index > 0 ? <button className="rb" onClick={() => go(edition, chapters[index - 1].n)}>Previous chapter</button> : <span />}
+                  {index < chapters.length - 1 && <button className="rb" onClick={() => go(edition, chapters[index + 1].n)}>Next chapter</button>}
+                </div>}
+                {paged && index === chapters.length - 1 && <p className="theend">නිමි</p>}
+              </div>
+            </div>
+            {paged && geo && <div className="pnums">
+              {Array.from({ length: geo.cols }, (_, k) => { const n = spread * geo.cols + k + 1; return <span key={k}>{n <= pages ? n : ""}</span>; })}
+            </div>}
           </div>
-        </div></div>
+          {paged && <button className="turn next" aria-label="Next page" onClick={() => turn(1)} disabled={spread >= spreads - 1 && index >= chapters.length - 1}>›</button>}
+          {loading && <div className="rbusy" role="status"><span className="spin" aria-hidden />Loading the chapter…</div>}
+        </div>
 
         <aside className={`rpanel${panel ? " on" : ""}`} aria-label={panel === "ai" ? "Reading assistant" : "Bookmarks and notes"}>
           {panel === "notes" && <>
@@ -350,7 +494,7 @@ export function Reader({ book, editions, edition, chapters, chapter, paragraphs,
                 {QUICK.map((x) => <button key={x} className="rb" style={{ textAlign: "left", whiteSpace: "normal" }} onClick={() => ask(x)}>{x}</button>)}</>}
               {asking && <div className="msg a">Thinking…</div>}
             </div>
-            <form className="chatin" onSubmit={(e) => { e.preventDefault(); ask(q); setQ(""); }}>
+            <form className="chatin" data-local onSubmit={(e) => { e.preventDefault(); ask(q); setQ(""); }}>
               <textarea value={q} onChange={(e) => setQ(e.target.value)} placeholder="Ask about this chapter" aria-label="Ask the reading assistant" onKeyDown={(e) => { if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); ask(q); setQ(""); } }} />
               <button className="rb on" disabled={asking || !q.trim()}>Send</button>
             </form>
@@ -362,7 +506,7 @@ export function Reader({ book, editions, edition, chapters, chapter, paragraphs,
 
       {pop && <div className="pop" style={{ display: "flex", left: pop.x, top: pop.y, transform: `translate(-50%, ${pop.below ? "0" : "-100%"})` }} onMouseDown={(e) => { if ((e.target as HTMLElement).tagName !== "INPUT") e.preventDefault(); }}>
         {pop.kind === "mark" ? <>{pop.mark.note && <span style={{ padding: "4px 8px", maxWidth: 220 }}>{pop.mark.note}</span>}<button onClick={() => removeMark(pop.mark.id)}>Remove highlight</button></>
-          : pop.noting ? <form style={{ display: "flex", gap: 4 }} onSubmit={(e) => { e.preventDefault(); addMark(1, note.trim()); }}>
+          : pop.noting ? <form style={{ display: "flex", gap: 4 }} data-local onSubmit={(e) => { e.preventDefault(); addMark(1, note.trim()); }}>
             <input autoFocus value={note} onChange={(e) => setNote(e.target.value)} placeholder="Write a note" aria-label="Note" maxLength={1000} style={{ border: 0, borderRadius: 7, padding: "7px 9px", width: 200, color: "#111", background: "#fff" }} /><button>Save</button></form>
           : <>
             {!lang && <>{SWATCH.map((c, i) => <button key={c} className="sw" style={{ background: c }} aria-label={`Highlight colour ${i + 1}`} onClick={() => addMark(i + 1)} />)}

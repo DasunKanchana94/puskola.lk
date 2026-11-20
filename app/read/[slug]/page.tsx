@@ -5,8 +5,8 @@ import { getBook, getViewer } from "@/lib/data";
 import { Reader } from "@/components/Reader";
 import type { Bookmark, Highlight } from "@/app/reader-actions";
 
-export default async function ReadPage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<{ ed?: string; ch?: string; p?: string }> }) {
-  const [{ slug }, { ed, ch, p }] = await Promise.all([params, searchParams]);
+export default async function ReadPage({ params, searchParams }: { params: Promise<{ slug: string }>; searchParams: Promise<{ ed?: string; ch?: string; p?: string; end?: string }> }) {
+  const [{ slug }, { ed, ch, p, end }] = await Promise.all([params, searchParams]);
   const [book, viewer] = await Promise.all([getBook(slug), getViewer()]);
   if (!book) notFound();
   const supabase = await db();
@@ -26,7 +26,12 @@ export default async function ReadPage({ params, searchParams }: { params: Promi
   const list = every.filter((c) => c.edition_id === edition.id);
   const chapter = list.find((c) => c.n === Number(ch)) ?? (saved?.edition_id === edition.id ? saved : undefined) ?? list[0];
   const startPara = ch ? Number(p) || 0 : saved && chapter?.id === saved.id ? progress?.para_idx ?? 0 : 0;
-  const { data: paragraphs } = chapter ? await supabase.from("paragraphs").select("idx,kind,body").eq("chapter_id", chapter.id).order("idx") : { data: [] };
+  const [{ data: paragraphs }, { data: heads }] = await Promise.all([
+    chapter ? supabase.from("paragraphs").select("idx,kind,body").eq("chapter_id", chapter.id).order("idx") : Promise.resolve({ data: [] as { idx: number; kind: string; body: string }[] }),
+    list.length ? supabase.from("paragraphs").select("chapter_id,idx,body").eq("kind", "h").in("chapter_id", list.map((c) => c.id)).order("idx") : Promise.resolve({ data: [] as { chapter_id: string; idx: number; body: string }[] }),
+  ]);
+  const sections: Record<string, { idx: number; title: string }[]> = {};
+  for (const h of heads ?? []) (sections[h.chapter_id] ??= []).push({ idx: h.idx, title: h.body });
   const locked = edition.tier === "sub" && !entitled;
 
   if (!chapter || !(paragraphs ?? []).length) {
@@ -55,6 +60,6 @@ export default async function ReadPage({ params, searchParams }: { params: Promi
     <Reader book={{ id: book.id, slug: book.slug, title: book.title_si, titleEn: book.title_en }}
       editions={editions.map((e) => ({ kind: e.kind, label: e.label, locked: e.tier === "sub" && !entitled }))} edition={edition.kind}
       chapters={list.map((c) => ({ id: c.id, n: c.n, title: c.title }))} chapter={chapter} paragraphs={paragraphs ?? []}
-      places={places} bookmarks={bookmarks} highlights={highlights} signedIn={!!viewer} startPara={startPara} />
+      places={places} bookmarks={bookmarks} highlights={highlights} signedIn={!!viewer} startPara={startPara} startAtEnd={end === "1"} sections={sections} />
   </>;
 }

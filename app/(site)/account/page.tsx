@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Submit } from "@/components/Submit";
 import { redirect } from "next/navigation";
 import { db } from "@/lib/supabase/server";
 import { getViewer, money } from "@/lib/data";
@@ -21,9 +22,9 @@ export default async function Account({ searchParams }: { searchParams: Promise<
         <form action={updateProfile} style={{ display: "grid", gap: 12, marginTop: 12, maxWidth: 380 }}>
           <label>Name<input className="inp" name="name" id="pf-name" defaultValue={viewer.name} required /></label>
           <label>Email<input className="inp" id="pf-email" value={viewer.email} disabled readOnly /></label>
-          <div className="row"><button className="btn pri">Save profile</button></div>
+          <div className="row"><Submit className="btn pri">Save profile</Submit></div>
         </form>
-        <form action={signOut} style={{ marginTop: 12 }}><button className="btn ghost">Sign out</button></form>
+        <form action={signOut} style={{ marginTop: 12 }}><Submit className="btn ghost">Sign out</Submit></form>
       </div>
       <div className="card"><h2>Subscription</h2>
         <p style={{ margin: "12px 0" }}>{viewer.hasPlan ? <><span className="pill">{viewer.planName}</span> {viewer.until ? `Active until ${viewer.until.slice(0, 10)}` : "Never expires"}</> : "Free member"}</p>

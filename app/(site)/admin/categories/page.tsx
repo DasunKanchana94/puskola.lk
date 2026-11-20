@@ -1,4 +1,5 @@
 import { db } from "@/lib/supabase/server";
+import { Submit } from "@/components/Submit";
 import { adminDelete, adminInsert, adminUpdate } from "@/app/admin-actions";
 import { Notice } from "@/components/ui";
 
@@ -21,8 +22,8 @@ export default async function Categories({ searchParams }: { searchParams: Promi
           <label className="small" style={{ flex: 1, minWidth: 130 }}>Name (Sinhala)<input className="inp" name="name_si" defaultValue={c.name_si} /></label>
           <label className="small">Colour<input className="inp" type="color" name="color" defaultValue={c.color} style={{ width: 60, padding: 2, height: 38 }} /></label>
           <label className="small">Order<input className="inp" type="number" name="sort" defaultValue={c.sort} style={{ width: 70 }} /></label>
-          <button className="btn sm pri">Save</button><span className="pill grey">{count(c.id)} books</span></form>
-        <form action={adminDelete.bind(null, "categories", c.id)}><input type="hidden" name="_back" value={back} /><button className="btn sm ghost danger" disabled={count(c.id) > 0} title={count(c.id) > 0 ? "Move its books to another category first" : undefined}>Delete</button></form>
+          <Submit className="btn sm pri">Save</Submit><span className="pill grey">{count(c.id)} books</span></form>
+        <form action={adminDelete.bind(null, "categories", c.id)}><input type="hidden" name="_back" value={back} /><Submit className="btn sm ghost danger" disabled={count(c.id) > 0} title={count(c.id) > 0 ? "Move its books to another category first" : undefined}>Delete</Submit></form>
       </div>)}
     </div>
     <h2 style={{ margin: "24px 0 10px" }}>Add category</h2>
@@ -30,6 +31,6 @@ export default async function Categories({ searchParams }: { searchParams: Promi
       <label className="small" style={{ flex: 1, minWidth: 130 }}>Name (English)<input className="inp" name="name" required /></label>
       <label className="small" style={{ flex: 1, minWidth: 130 }}>Name (Sinhala)<input className="inp" name="name_si" /></label>
       <label className="small">Colour<input className="inp" type="color" name="color" defaultValue="#0c6b66" style={{ width: 60, padding: 2, height: 38 }} /></label>
-      <button className="btn pri">Add category</button></form>
+      <Submit className="btn pri">Add category</Submit></form>
   </>;
 }

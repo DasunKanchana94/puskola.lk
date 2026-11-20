@@ -1,4 +1,5 @@
 import { db } from "@/lib/supabase/server";
+import { Submit } from "@/components/Submit";
 import { adminUpdate } from "@/app/admin-actions";
 import { Notice } from "@/components/ui";
 
@@ -18,7 +19,7 @@ export default async function Pricing({ searchParams }: { searchParams: Promise<
         <label className="small">Price (USD)<input className="inp" type="number" name="price_usd" min="0" step="0.01" defaultValue={p.price_usd} required style={{ width: 110 }} /></label>
         <span className="pill grey">{p.months ? `${p.months} months` : "Lifetime"}</span>
         <label className="row small" style={{ gap: 5 }}><input type="checkbox" name="active" defaultChecked={p.active} />On sale</label>
-        <button className="btn sm pri">Save</button></form>)}
+        <Submit className="btn sm pri">Save</Submit></form>)}
     </div>
   </>;
 }

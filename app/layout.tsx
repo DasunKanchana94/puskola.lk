@@ -1,5 +1,7 @@
 import type { Metadata } from "next";
 import { cookies } from "next/headers";
+import { Suspense } from "react";
+import { NavProgress } from "@/components/NavProgress";
 import "./globals.css";
 
 export const metadata: Metadata = {
@@ -17,7 +19,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         {/* eslint-disable-next-line @next/next/no-page-custom-font */}
         <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,600;12..96,800&family=Figtree:wght@400;600;700&family=Noto+Sans+Sinhala:wght@400;600;700&family=Noto+Serif+Sinhala:wght@400;600&display=swap" rel="stylesheet" />
       </head>
-      <body className={theme}>{children}</body>
+      <body className={theme}><Suspense fallback={null}><NavProgress /></Suspense>{children}</body>
     </html>
   );
 }

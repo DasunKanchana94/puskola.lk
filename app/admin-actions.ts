@@ -116,31 +116,71 @@ function parseText(text: string, fallbackTitle: string): Chapter[] {
   return chapters.filter((c) => c.blocks.length);
 }
 
-/** Loads the text of one edition from a .json file (restoration pipeline) or a .txt file. Replaces the edition's existing text. */
+type AuthorInfo = { name?: string; name_si?: string; era?: string; bio?: string };
+
+/** Reads the author from a book file: either "author": "Name" or "author": { name, name_si, era, bio }. */
+function authorOf(meta: Record<string, unknown>): AuthorInfo | null {
+  const a = meta.author ?? meta.author_name;
+  const info: AuthorInfo = typeof a === "string" ? { name: a } : a && typeof a === "object" ? (a as AuthorInfo) : {};
+  if (!info.name_si && typeof meta.author_si === "string") info.name_si = meta.author_si;
+  info.name = info.name?.trim(); info.name_si = info.name_si?.trim();
+  return info.name || info.name_si ? info : null;
+}
+
+/** Finds the author by English name, Sinhala name or slug; adds a new author if there is no match. Returns the author and whether it was new. */
+async function findOrCreateAuthor(supabase: Awaited<ReturnType<typeof admin>>, info: AuthorInfo) {
+  const norm = (x?: string | null) => (x ?? "").toLowerCase().replace(/\s+/g, " ").trim();
+  const slug = slugify(info.name ?? "") || "author-" + Date.now();
+  const { data: all } = await supabase.from("authors").select("id,name,name_si,slug");
+  const hit = (all ?? []).find((a) => (info.name && norm(a.name) === norm(info.name)) || (info.name_si && norm(a.name_si) === norm(info.name_si)) || a.slug === slug);
+  if (hit) return { id: hit.id as string, name: (hit.name || hit.name_si) as string, created: false };
+  const row = { slug, name: info.name || info.name_si!, name_si: info.name_si ?? "", era: info.era ?? "", bio: info.bio ?? "" };
+  const { data, error } = await supabase.from("authors").insert(row).select("id").single();
+  if (error || !data) throw new Error(`The author ${row.name} could not be added: ${error?.message}`);
+  return { id: data.id as string, name: row.name, created: true };
+}
+
+/**
+ * Loads the text of one edition from a .json file (restoration pipeline) or a .txt file. Replaces the edition's existing text.
+ * A .json file may also name the author; the book is then linked to that author, who is added first if new.
+ */
 export async function importText(editionId: string, form: FormData) {
   const supabase = await admin();
   const file = form.get("file");
   if (!(file instanceof File) || !file.size) done(form, "/admin/books", "Choose a text file first.");
   const raw = await (file as File).text();
   let chapters: Chapter[];
+  let author: AuthorInfo | null = null;
   if ((file as File).name.toLowerCase().endsWith(".json")) {
-    try { chapters = JSON.parse(raw).chapters; } catch { return done(form, "/admin/books", "That file is not valid JSON."); }
+    let meta: Record<string, unknown>;
+    try { meta = JSON.parse(raw); } catch { return done(form, "/admin/books", "That file is not valid JSON."); }
+    chapters = meta.chapters as Chapter[];
     if (!Array.isArray(chapters)) return done(form, "/admin/books", "The JSON file has no chapters list.");
+    author = authorOf(meta);
   } else chapters = parseText(raw, String(form.get("title") ?? "Text"));
   if (!chapters.length) return done(form, "/admin/books", "No text was found in that file.");
-  await supabase.from("chapters").delete().eq("edition_id", editionId);
-  let count = 0;
-  for (const ch of chapters) {
-    const { data: row, error } = await supabase.from("chapters").insert({ edition_id: editionId, n: ch.n, title: ch.title, subtitle: ch.subtitle ?? "" }).select("id").single();
-    if (error || !row) return done(form, "/admin/books", `Chapter ${ch.n} could not be saved: ${error?.message}`);
-    const rows = ch.blocks.map((b, idx) => ({ chapter_id: row.id, idx, kind: b.k, body: b.t }));
-    for (let i = 0; i < rows.length; i += 400) {
-      const { error: e2 } = await supabase.from("paragraphs").insert(rows.slice(i, i + 400));
-      if (e2) return done(form, "/admin/books", `Chapter ${ch.n} text could not be saved: ${e2.message}`);
-    }
-    count += rows.length;
+
+  let authorNote = "";
+  if (author) {
+    const { data: ed } = await supabase.from("book_editions").select("book_id").eq("id", editionId).maybeSingle();
+    try {
+      const a = await findOrCreateAuthor(supabase, author);
+      if (ed) await supabase.from("books").update({ author_id: a.id }).eq("id", ed.book_id);
+      authorNote = a.created ? ` Added the new author ${a.name} and linked the book.` : ` Linked the book to ${a.name}.`;
+    } catch (e) { return done(form, "/admin/books", (e as Error).message); }
   }
-  done(form, "/admin/books", undefined, `Imported ${chapters.length} chapters and ${count} paragraphs.`);
+
+  await supabase.from("chapters").delete().eq("edition_id", editionId);
+  const { data: rows, error } = await supabase.from("chapters")
+    .insert(chapters.map((ch) => ({ edition_id: editionId, n: ch.n, title: ch.title, subtitle: ch.subtitle ?? "" }))).select("id,n");
+  if (error || !rows) return done(form, "/admin/books", `The chapters could not be saved: ${error?.message}`);
+  const idOf = Object.fromEntries(rows.map((r) => [r.n, r.id]));
+  const paras = chapters.flatMap((ch) => ch.blocks.map((b, idx) => ({ chapter_id: idOf[ch.n], idx, kind: b.k, body: b.t })));
+  for (let i = 0; i < paras.length; i += 1000) {
+    const { error: e2 } = await supabase.from("paragraphs").insert(paras.slice(i, i + 1000));
+    if (e2) return done(form, "/admin/books", `The text could not be saved: ${e2.message}`);
+  }
+  done(form, "/admin/books", undefined, `Imported ${chapters.length} chapters and ${paras.length} paragraphs.${authorNote}`);
 }
 
 /** Gives a reader a plan by hand (for example a gift or a bank-transfer payment). */

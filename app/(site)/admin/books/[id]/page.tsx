@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { Submit } from "@/components/Submit";
 import { notFound } from "next/navigation";
 import { db } from "@/lib/supabase/server";
 import { fileUrl } from "@/lib/data";
@@ -27,7 +28,7 @@ export default async function EditBook({ params, searchParams }: { params: Promi
       <form action={adminUpdate.bind(null, "books", id)} className="card" style={{ display: "grid", gap: 12 }}>
         <h2>Details</h2><input type="hidden" name="_back" value={back} />
         <BookFields book={book} authors={authors ?? []} categories={cats ?? []} withSlug />
-        <div><button className="btn pri">Save details</button></div>
+        <div><Submit className="btn pri">Save details</Submit></div>
       </form>
       <div style={{ display: "grid", gap: 16 }}>
         <div className="card"><h2>Cover image</h2>
@@ -42,22 +43,22 @@ export default async function EditBook({ params, searchParams }: { params: Promi
             <form action={adminUpdate.bind(null, "book_editions", e.id)} className="row"><input type="hidden" name="_back" value={back} />
               <input className="inp" style={{ flex: 1, minWidth: 140 }} name="label" aria-label="Edition name" defaultValue={e.label} required />
               <select className="inp" style={{ width: "auto" }} name="tier" aria-label="Access" defaultValue={e.tier}><option value="free">Free</option><option value="sub">Subscription</option></select>
-              <button className="btn sm">Save</button></form>
+              <Submit className="btn sm">Save</Submit></form>
             <div className="small">{e.chapters?.[0]?.count ? <span className="pill">{e.chapters[0].count} chapters loaded</span> : <span className="pill grey">No text yet</span>}</div>
             <form action={importText.bind(null, e.id)} className="row"><input type="hidden" name="_back" value={back} /><input type="hidden" name="title" value={book.title_si} />
               <input className="inp" style={{ flex: 1, minWidth: 180 }} type="file" name="file" accept=".txt,.json" aria-label={`Text file for ${e.label}`} required />
-              <button className="btn sm pri">{e.chapters?.[0]?.count ? "Replace text" : "Upload text"}</button></form>
-            {editions.length > 1 && <form action={adminDelete.bind(null, "book_editions", e.id)}><input type="hidden" name="_back" value={back} /><button className="btn sm ghost danger">Delete this edition and its text</button></form>}
+              <Submit className="btn sm pri">{e.chapters?.[0]?.count ? "Replace text" : "Upload text"}</Submit></form>
+            {editions.length > 1 && <form action={adminDelete.bind(null, "book_editions", e.id)}><input type="hidden" name="_back" value={back} /><Submit className="btn sm ghost danger">Delete this edition and its text</Submit></form>}
           </div>)}
           <form action={adminInsert.bind(null, "book_editions")} className="row" style={{ borderTop: "1px solid var(--line)", paddingTop: 12 }}>
             <input type="hidden" name="_back" value={back} /><input type="hidden" name="book_id" value={id} /><input type="hidden" name="sort" value={editions.length + 1} />
             <input className="inp" style={{ flex: 1, minWidth: 120 }} name="label" placeholder="New edition name" aria-label="New edition name" required />
             <input className="inp" style={{ width: 120 }} name="kind" placeholder="short-code" aria-label="Short code, such as modern" pattern="[a-z0-9-]+" required />
             <select className="inp" style={{ width: "auto" }} name="tier" aria-label="Access" defaultValue="sub"><option value="free">Free</option><option value="sub">Subscription</option></select>
-            <button className="btn sm">Add edition</button></form>
+            <Submit className="btn sm">Add edition</Submit></form>
           <p className="muted small" style={{ marginTop: 10 }}>Text files: .txt or the .json made by the restoration work, up to 4 MB. In a .txt file, start each chapter with a line beginning &quot;# &quot;, leave a blank line between paragraphs, and begin verse lines with &quot;&gt;&quot;. PDF and Word files are not converted yet.</p>
         </div>
-        <form action={adminDelete.bind(null, "books", id)} className="card"><input type="hidden" name="_back" value="/admin/books" /><h2>Delete book</h2><p className="muted small" style={{ margin: "6px 0 10px" }}>Removes the book, its editions, its text and readers&apos; bookmarks in it. This cannot be undone.</p><button className="btn danger">Delete {book.title_en}</button></form>
+        <form action={adminDelete.bind(null, "books", id)} className="card"><input type="hidden" name="_back" value="/admin/books" /><h2>Delete book</h2><p className="muted small" style={{ margin: "6px 0 10px" }}>Removes the book, its editions, its text and readers&apos; bookmarks in it. This cannot be undone.</p><Submit className="btn danger">Delete {book.title_en}</Submit></form>
       </div>
     </div>
   </>;

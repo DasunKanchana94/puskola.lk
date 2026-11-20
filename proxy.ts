@@ -14,7 +14,8 @@ export async function proxy(request: NextRequest) {
       },
     },
   });
-  await supabase.auth.getUser();
+  // Refreshes an expired session; with signing keys this check needs no call to the auth server.
+  await supabase.auth.getClaims();
   if (!request.cookies.get("country")) {
     const detected = request.headers.get("x-vercel-ip-country") || "XX";
     response.cookies.set("country", detected, { path: "/", maxAge: 60 * 60 * 24 * 365 });

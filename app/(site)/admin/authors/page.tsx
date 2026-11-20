@@ -1,4 +1,5 @@
 import { db } from "@/lib/supabase/server";
+import { Submit } from "@/components/Submit";
 import { fileUrl } from "@/lib/data";
 import { adminDelete, adminInsert, adminUpdate } from "@/app/admin-actions";
 import { FileUpload } from "@/components/FileUpload";
@@ -33,11 +34,11 @@ export default async function Authors({ searchParams }: { searchParams: Promise<
           <b>{a.name}</b><span className="pill grey">{count(a.id)} books</span><span className="sp" />
           <FileUpload bucket="authors" table="authors" id={a.id} accept="image/*" label={photo ? "Replace photo" : "Upload photo"} maxMb={5} />
         </div>
-        <form action={adminUpdate.bind(null, "authors", a.id)} style={{ display: "grid", gap: 10 }}><input type="hidden" name="_back" value={back} /><Fields a={a} /><div><button className="btn sm pri">Save</button></div></form>
-        <form action={adminDelete.bind(null, "authors", a.id)}><input type="hidden" name="_back" value={back} /><button className="btn sm ghost danger">Delete author</button></form>
+        <form action={adminUpdate.bind(null, "authors", a.id)} style={{ display: "grid", gap: 10 }}><input type="hidden" name="_back" value={back} /><Fields a={a} /><div><Submit className="btn sm pri">Save</Submit></div></form>
+        <form action={adminDelete.bind(null, "authors", a.id)}><input type="hidden" name="_back" value={back} /><Submit className="btn sm ghost danger">Delete author</Submit></form>
       </div>; })}
     </div>
     <h2 style={{ margin: "24px 0 10px" }}>Add author</h2>
-    <form action={adminInsert.bind(null, "authors")} className="card" style={{ display: "grid", gap: 10 }}><input type="hidden" name="_back" value={back} /><Fields /><div><button className="btn pri">Add author</button></div></form>
+    <form action={adminInsert.bind(null, "authors")} className="card" style={{ display: "grid", gap: 10 }}><input type="hidden" name="_back" value={back} /><Fields /><div><Submit className="btn pri">Add author</Submit></div></form>
   </>;
 }
