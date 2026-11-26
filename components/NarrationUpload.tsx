@@ -5,6 +5,7 @@ import { useState } from "react";
 import { FileAudio, ListMusic, Trash2, Upload } from "lucide-react";
 import { browserDb } from "@/lib/supabase/client";
 import { deleteTrack, saveTimings, saveTrack } from "@/app/admin-actions";
+import { NarrationGenerate } from "@/components/NarrationGenerate";
 
 export type ChapterAudio = { id: string; n: number; title: string; track: { duration: number; timed: boolean } | null };
 
@@ -73,7 +74,8 @@ export function NarrationUpload({ editionId, chapters }: { editionId: string; ch
       <summary><ListMusic size={18} strokeWidth={1.75} aria-hidden /> Audiobook narration
         <span className="muted small">{withAudio ? `${withAudio} of ${chapters.length} chapters · ${clock(total)}` : "none yet"}</span></summary>
       <div style={{ display: "grid", gap: 10, marginTop: 10 }}>
-        <p className="muted small">One audio file per chapter (MP3 or M4A). Choose several at once: files are matched to chapters by the number in their names, such as 01.mp3, 02.mp3. Read-along highlighting works without extra files; add a timings file for exact word highlighting.</p>
+        <NarrationGenerate editionId={editionId} chapters={chapters} />
+        <p className="muted small"><b>Or upload recordings.</b> One audio file per chapter (MP3 or M4A). Choose several at once: files are matched to chapters by the number in their names, such as 01.mp3, 02.mp3. Read-along highlighting works without extra files; add a timings file for exact word highlighting.</p>
         <span className="row" style={{ gap: 8 }}>
           <label className={`btn sm pri${busy ? " disabled" : ""}`} htmlFor={`narr-${editionId}`}><Upload size={16} strokeWidth={1.75} aria-hidden />Upload chapter files</label>
           <input id={`narr-${editionId}`} type="file" accept="audio/*" multiple hidden disabled={!!busy} onChange={(e) => { const f = e.target.files; e.target.value = ""; uploadMany(f); }} />

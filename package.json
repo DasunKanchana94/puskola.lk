@@ -9,10 +9,12 @@
     "lint": "eslint"
   },
   "dependencies": {
+    "@breezystack/lamejs": "^1.2.7",
     "@supabase/ssr": "^0.12.7",
     "@supabase/supabase-js": "^2.119.0",
     "fflate": "^0.8.3",
     "lucide-react": "^1.81.0",
+    "microsoft-cognitiveservices-speech-sdk": "^1.53.0",
     "next": "16.4.6",
     "react": "19.3.0",
     "react-dom": "19.3.0"
