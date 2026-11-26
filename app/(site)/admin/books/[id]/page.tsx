@@ -5,6 +5,7 @@ import { db } from "@/lib/supabase/server";
 import { fileUrl } from "@/lib/data";
 import { adminDelete, adminInsert, adminUpdate } from "@/app/admin-actions";
 import { TextImport } from "@/components/TextImport";
+import { NarrationUpload, type ChapterAudio } from "@/components/NarrationUpload";
 import { BookFields } from "@/components/BookFields";
 import { FileUpload } from "@/components/FileUpload";
 import { Notice } from "@/components/ui";
@@ -22,6 +23,14 @@ export default async function EditBook({ params, searchParams }: { params: Promi
   if (!book) notFound();
   const back = `/admin/books/${id}`, cover = fileUrl("covers", book.cover_path);
   const editions = ([...book.book_editions] as Edition[]).sort((a, b) => a.sort - b.sort);
+  const { data: chs } = editions.length
+    ? await supabase.from("chapters").select("id,n,title,edition_id,audio_tracks(duration_sec,timings)").in("edition_id", editions.map((e) => e.id)).order("n")
+    : { data: [] };
+  type Ch = { id: string; n: number; title: string; edition_id: string; audio_tracks: { duration_sec: number; timings: unknown }[] | { duration_sec: number; timings: unknown } | null };
+  const audioOf = (edId: string): ChapterAudio[] => ((chs ?? []) as Ch[]).filter((c) => c.edition_id === edId).map((c) => {
+    const t = Array.isArray(c.audio_tracks) ? c.audio_tracks[0] : c.audio_tracks;
+    return { id: c.id, n: c.n, title: c.title, track: t ? { duration: t.duration_sec, timed: !!t.timings } : null };
+  });
   return <>
     <div className="row"><h1>{book.title_en}</h1><span className="sp" /><Link className="btn sm" href={`/books/${book.slug}`}>View on site</Link><Link className="btn sm" href="/admin/books">All books</Link></div>
     <div style={{ marginTop: 14 }}><Notice error={error} notice={notice} /></div>
@@ -47,6 +56,7 @@ export default async function EditBook({ params, searchParams }: { params: Promi
               <Submit className="btn sm">Save</Submit></form>
             <div className="small">{e.chapters?.[0]?.count ? <span className="pill">{e.chapters[0].count} chapters loaded</span> : <span className="pill grey">No text yet</span>}</div>
             <TextImport editionId={e.id} bookId={id} title={book.title_si} hasText={!!e.chapters?.[0]?.count} />
+            {!!e.chapters?.[0]?.count && <NarrationUpload editionId={e.id} chapters={audioOf(e.id)} />}
             {editions.length > 1 && <form action={adminDelete.bind(null, "book_editions", e.id)}><input type="hidden" name="_back" value={back} /><Submit className="btn sm ghost danger">Delete this edition and its text</Submit></form>}
           </div>)}
           <form action={adminInsert.bind(null, "book_editions")} className="row" style={{ borderTop: "1px solid var(--line)", paddingTop: 12 }}>

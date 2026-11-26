@@ -89,6 +89,18 @@ export async function saveProgress(bookId: string, chapterId: string, paraIdx: n
   await supabase.from("reading_progress").upsert({ user_id: user.id, book_id: bookId, chapter_id: chapterId, para_idx: paraIdx, pct, updated_at: new Date().toISOString() });
 }
 
+/** Remembers where a listener is in an audiobook: chapter, position in seconds, speed, and overall progress. */
+export async function saveListenProgress(bookId: string, chapterId: string, positionSec: number, rate: number, pct: number) {
+  const supabase = await db();
+  const { data } = await supabase.auth.getClaims();
+  const uid = data?.claims?.sub;
+  if (!uid) return;
+  await supabase.from("listen_progress").upsert({
+    user_id: uid, book_id: bookId, chapter_id: chapterId,
+    position_sec: Math.max(0, Math.round(positionSec * 10) / 10), rate, pct: Math.min(100, Math.max(0, pct)), updated_at: new Date().toISOString(),
+  });
+}
+
 /* ---------- back office ---------- */
 async function requireAdmin() {
   const supabase = await db();

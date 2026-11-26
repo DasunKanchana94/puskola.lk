@@ -48,3 +48,11 @@ Colour never carries meaning alone: every pill also has a word ("Free", "New", "
 - One primary button per view. Visible focus ring (2px accent, 2px offset).
 - Icons: lucide-react, 1.75 stroke, 18 to 20px, never emoji. Icon-only buttons carry an aria-label.
 - Phones: a bottom tab bar (Home, Browse, Library, Audio, Account) replaces the top nav row.
+
+## Audiobook player
+
+- Full-screen listening view (`/listen/<book>`): top bar (back, title and chapter, Read along / Cover switch, Chapters), content, player docked at the bottom.
+- Read along: the spoken paragraph gets the soft fill and an accent rule on the left; the spoken word gets an accent underline. Tapping any line or word seeks there. Scrolling by hand stops auto-follow and shows "Back to the narration".
+- Cover mode: large cover, chapter and section, and the current passage in muted text.
+- Player: seek bar with elapsed and remaining time, previous chapter, back 15 s, play (64px, the one primary control), forward 30 s, next chapter; speed and sleep timer menus; volume on wide screens.
+- Keys: Space or K play and pause, J or Left back 15 s, L or Right forward 30 s, [ and ] speed, M mute, Esc closes menus.

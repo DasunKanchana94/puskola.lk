@@ -97,6 +97,56 @@ export async function setFilePath(table: "books" | "authors" | "media_items", id
   revalidatePath("/", "layout");
 }
 
+/* ---------- audiobook narration ---------- */
+
+/** Records the narration file for one chapter, replacing any earlier file. The browser has already uploaded it to media/narration/... */
+export async function saveTrack(editionId: string, chapterId: string, path: string, durationSec: number): Promise<{ ok: boolean; message: string }> {
+  const supabase = await admin();
+  if (!path.startsWith("narration/")) return { ok: false, message: "That is not a narration file." };
+  const { data: old } = await supabase.from("audio_tracks").select("file_path").eq("chapter_id", chapterId).maybeSingle();
+  const { error } = await supabase.from("audio_tracks").upsert({ edition_id: editionId, chapter_id: chapterId, file_path: path, duration_sec: durationSec, timings: null }, { onConflict: "chapter_id" });
+  if (error) return { ok: false, message: error.message };
+  if (old?.file_path && old.file_path !== path) await supabase.storage.from("media").remove([old.file_path]);
+  revalidatePath("/", "layout");
+  return { ok: true, message: "Saved." };
+}
+
+/**
+ * Adds read-along timings to a chapter's narration. Accepts either
+ * { "p": [[paragraphIdx, startSec, endSec], ...], "w": { "idx": [[startSec, endSec, charStart, charEnd], ...] } }
+ * or a list of word boundaries [{ "i": paragraphIdx, "t": startSec, "d": durationSec, "c": charStart, "l": length }, ...].
+ */
+export async function saveTimings(chapterId: string, raw: string): Promise<{ ok: boolean; message: string }> {
+  const supabase = await admin();
+  let data: unknown;
+  try { data = JSON.parse(raw); } catch { return { ok: false, message: "That timings file is not valid JSON." }; }
+  let timings: { p: [number, number, number][]; w: Record<string, [number, number, number, number][]> };
+  if (Array.isArray(data)) {
+    const words = data as { i: number; t: number; d: number; c: number; l: number }[];
+    const w: Record<string, [number, number, number, number][]> = {}; const span: Record<number, [number, number]> = {};
+    for (const x of words) {
+      (w[x.i] ??= []).push([x.t, x.t + x.d, x.c, x.c + x.l]);
+      span[x.i] = [Math.min(span[x.i]?.[0] ?? x.t, x.t), Math.max(span[x.i]?.[1] ?? 0, x.t + x.d)];
+    }
+    timings = { p: Object.entries(span).map(([i, [a, b]]) => [Number(i), a, b] as [number, number, number]).sort((a, b) => a[1] - b[1]), w };
+  } else if (data && typeof data === "object" && Array.isArray((data as { p?: unknown }).p)) {
+    timings = { p: (data as { p: [number, number, number][] }).p, w: (data as { w?: typeof timings.w }).w ?? {} };
+  } else return { ok: false, message: "The timings file has no paragraph or word times." };
+  const { error } = await supabase.from("audio_tracks").update({ timings }).eq("chapter_id", chapterId);
+  if (error) return { ok: false, message: error.message };
+  revalidatePath("/", "layout");
+  return { ok: true, message: `Read-along timings saved for ${timings.p.length} paragraphs.` };
+}
+
+/** Removes a chapter's narration and its file. */
+export async function deleteTrack(chapterId: string) {
+  const supabase = await admin();
+  const { data } = await supabase.from("audio_tracks").select("file_path").eq("chapter_id", chapterId).maybeSingle();
+  await supabase.from("audio_tracks").delete().eq("chapter_id", chapterId);
+  if (data?.file_path) await supabase.storage.from("media").remove([data.file_path]);
+  revalidatePath("/", "layout");
+}
+
 /** A block of text: paragraph, verse, heading, or a picture (t is its file path, cap its caption). */
 type Block = { k: "p" | "v" | "h" | "img"; t: string; cap?: string };
 type Chapter = { n: number; title: string; subtitle?: string; blocks: Block[] };
